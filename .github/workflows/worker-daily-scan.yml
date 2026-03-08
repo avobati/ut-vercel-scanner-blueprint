@@ -52,7 +52,7 @@ jobs:
       - name: Run group scan
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SCAN_TIMEFRAME: weekly
+          SCAN_TIMEFRAME: ${{ secrets.SCAN_TIMEFRAME || 'daily' }}
           PYTHON_BIN: python3
           ALLOW_NO_DB: "0"
         run: pnpm worker -- --group ${{ matrix.group }}
