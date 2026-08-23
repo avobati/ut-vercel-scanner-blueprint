@@ -14,7 +14,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with: { version: 11 }
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: pnpm }
+        with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter db migrate
         env: { DATABASE_URL: "${{ secrets.DATABASE_URL }}" }
@@ -31,7 +31,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with: { version: 11 }
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: pnpm }
+        with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter worker start -- --shard ${{ matrix.shard }}
         env:
