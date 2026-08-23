@@ -2,6 +2,7 @@
 import universe from "../data/universe.json";
 import symbolMeta from "../data/symbol_meta.json";
 import manualBackfill from "../data/manual_backfill.json";
+import { scoreSignals, type ScannerRow, type Timeframe } from "./scanner";
 
 type SignalRow = {
   symbol: string;
@@ -30,7 +31,7 @@ type BackfillEntry = {
 const rawDatabaseUrl = (process.env.DATABASE_URL || "").trim();
 const hasPlaceholderDbUrl = /user:pass@host/.test(rawDatabaseUrl);
 const useNoDbMode = !rawDatabaseUrl || hasPlaceholderDbUrl;
-const pool = useNoDbMode ? null : new Pool({ connectionString: rawDatabaseUrl });
+const pool = useNoDbMode ? null : new Pool({ connectionString: rawDatabaseUrl, allowExitOnIdle: true });
 
 const meta = symbolMeta as Record<string, MetaEntry>;
 const backfill = manualBackfill as Record<string, BackfillEntry>;
@@ -191,4 +192,33 @@ export async function getLatestSignals(limit = 10000, timeframe = "weekly"): Pro
       ...m,
     };
   });
+}
+
+const demo: Array<[string, ScannerRow["market"], number, number, number, string, boolean]> = [
+  ["BTCUSDT", "SPOT", 115420, 2.84, 4.8e9, "BBBBBB", true], ["ETHUSDT", "SPOT", 4862.4, 1.92, 2.1e9, "BBBBBS", false],
+  ["TAOUSDT", "PERP", 368.21, 5.74, 184e6, "BBBBBB", true], ["SOLUSDT", "PERP", 241.08, -1.14, 912e6, "SSSSSS", false],
+  ["XRPUSDT", "SPOT", 3.084, -2.31, 742e6, "SSSSSB", true], ["LINKUSDT", "PERP", 27.62, 3.18, 224e6, "BBBBSS", false],
+  ["AAVEUSDT", "SPOT", 329.44, 0.72, 97e6, "BBBBBS", false], ["SUIUSDT", "PERP", 4.188, -4.08, 318e6, "SSSSSS", true],
+  ["ENAUSDT", "SPOT", .8241, 6.31, 143e6, "BBBSSS", false], ["DOGEUSDT", "SPOT", .2384, -0.83, 522e6, "SSSSBS", false],
+];
+
+function demoRows(): ScannerRow[] {
+  const tfs: Timeframe[] = ["1H", "4H", "6H", "12H", "1D", "1W"];
+  const ages = ["2h", "8h", "12h", "1d", "4d", "2w"];
+  return demo.map(([symbol, market, price, change24h, volume24h, pattern, isNewAlignment], rowIndex) => {
+    const signals = Object.fromEntries(tfs.map((tf, i) => [tf, { direction: pattern[i] === "B" ? "BUY" : "SELL", age: ages[(i + rowIndex) % ages.length], barsAgo: (i + rowIndex) % 7 + 1 }])) as ScannerRow["signals"];
+    return { symbol, base: symbol.replace(/USDT$/, ""), quote: "USDT", market, price, change24h, volume24h, signals, ...scoreSignals(signals), lastChange: rowIndex % 2 ? `${rowIndex + 1}h ago` : "42m ago", isNewAlignment, updatedAt: new Date().toISOString() };
+  });
+}
+
+export async function getScannerRows(): Promise<ScannerRow[]> {
+  if (!pool) return demoRows();
+  try {
+    const { rows } = await pool.query(`select symbol, base_asset, quote_asset, market_type, price, change_24h, volume_24h, updated_at,
+      jsonb_object_agg(timeframe, jsonb_build_object('direction', direction, 'barsAgo', bars_ago, 'age', age_label)) as signals,
+      max(case when is_new_alignment then 1 else 0 end) as is_new_alignment
+      from scanner_latest group by symbol, base_asset, quote_asset, market_type, price, change_24h, volume_24h, updated_at order by volume_24h desc limit 2500`);
+    if (!rows.length) return demoRows();
+    return rows.map((r) => { const signals = r.signals as ScannerRow["signals"]; return { symbol: r.symbol, base: r.base_asset, quote: r.quote_asset, market: r.market_type, price: Number(r.price), change24h: Number(r.change_24h), volume24h: Number(r.volume_24h), signals, ...scoreSignals(signals), lastChange: "recently", isNewAlignment: Boolean(Number(r.is_new_alignment)), updatedAt: r.updated_at }; });
+  } catch { return demoRows(); }
 }

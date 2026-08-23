@@ -3,5 +3,6 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "main": "src/index.mjs"
+  "main": "src/index.mjs",
+  "scripts": { "test": "node --test src/*.test.mjs" }
 }

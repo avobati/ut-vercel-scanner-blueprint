@@ -8,7 +8,7 @@ const useNoDbMode = allowNoDb || !rawDatabaseUrl || hasPlaceholderDbUrl;
 
 let pool = null;
 if (!useNoDbMode) {
-  pool = new Pool({ connectionString: rawDatabaseUrl });
+  pool = new Pool({ connectionString: rawDatabaseUrl, allowExitOnIdle: true });
 }
 
 async function query(sql, params = []) {
@@ -86,3 +86,10 @@ export async function getLatestSignals(limit = 100) {
   const { rows } = await query(sql, [limit]);
   return rows;
 }
+
+export async function startScannerRun(shard) { const {rows}=await query("insert into scan_runs(shard,status) values($1,'running') returning id",[shard]); return rows[0]; }
+export async function completeScannerRun(id,count,error=null) { await query("update scan_runs set status=$2,symbols_scanned=$3,error=$4,finished_at=now() where id=$1",[id,error?"failed":"success",count,error]); }
+export async function upsertMarket(m) { const {rows}=await query(`insert into markets(symbol,base_asset,quote_asset,market_type,price,change_24h,volume_24h) values($1,$2,$3,$4,$5,$6,$7) on conflict(symbol,market_type) do update set base_asset=excluded.base_asset,quote_asset=excluded.quote_asset,price=excluded.price,change_24h=excluded.change_24h,volume_24h=excluded.volume_24h,active=true,updated_at=now() returning id`,[m.symbol,m.base,m.quote,m.market,Number(m.ticker?.lastPrice||0),Number(m.ticker?.priceChangePercent||0),Number(m.ticker?.quoteVolume||0)]); return rows[0].id; }
+export async function latestDirections(marketId) { const {rows}=await query("select distinct on(timeframe) timeframe,direction from ut_signals where market_id=$1 order by timeframe,candle_close_at desc",[marketId]); return Object.fromEntries(rows.map(r=>[r.timeframe,r.direction])); }
+export async function saveUtSignal(s) { await query(`insert into ut_signals(market_id,timeframe,direction,bars_ago,signal_at,candle_close_at,price,trailing_stop,run_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict(market_id,timeframe,candle_close_at) do update set direction=excluded.direction,bars_ago=excluded.bars_ago,price=excluded.price,trailing_stop=excluded.trailing_stop,run_id=excluded.run_id`,[s.marketId,s.timeframe,s.direction,s.barsAgo,s.signalAt,s.candleCloseAt,s.price,s.stop,s.runId]); }
+export async function saveAlignmentEvent(e) { await query(`insert into alignment_events(market_id,direction,previous_count,new_count,trigger_timeframe,entry_price) select $1,$2,$3,$4,$5,$6 where not exists(select 1 from alignment_events where market_id=$1 and direction=$2 and detected_at>now()-interval '1 hour')`,[e.marketId,e.direction,e.previousCount,e.newCount,e.trigger,e.price]); }

@@ -1,6 +1,6 @@
-# UT Scanner V2 Blueprint (Vercel + Worker + DB)
+# Signal Grid — MEXC UT Bot Scanner
 
-This is a separate app scaffold that keeps your current scanner untouched.
+Production multi-timeframe MEXC scanner for the canonical UT Bot trailing-stop strategy (K=2, ATR=10).
 
 ## Goal
 - Reuse the same UT logic in a new deployable architecture.
