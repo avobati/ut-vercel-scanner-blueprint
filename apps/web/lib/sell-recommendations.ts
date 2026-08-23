@@ -1,29 +1,18 @@
-﻿export type SignalInput = {
-  symbol: string;
-  symbol_name: string;
-  market: string;
-  timeframe: string;
-  signal: string;
-  price: number | string | null;
-  signal_price: number | string | null;
-  bars_ago: number | null;
-  ts: string;
-  data_quality?: "complete" | "inferred" | "missing";
-};
+﻿import type { SignalInput } from "./recommendations";
 
-export type Recommendation = {
+export type SellRecommendation = {
   symbol: string;
   symbol_name: string;
   market: string;
   timeframe: string;
-  signal: "BUY";
+  signal: "SELL";
   candles_ago: number;
   signal_price: number;
   current_price: number;
   change: number;
   pct_change: number;
   recency_factor: number;
-  momentum_factor: number;
+  downside_momentum_factor: number;
   entry_factor: number;
   freshness_factor: number;
   market_factor: number;
@@ -56,8 +45,9 @@ function recencyFactor(candlesAgo: number): number {
   return clamp01(Math.exp(-candlesAgo / 6));
 }
 
-function momentumFactor(pctChange: number): number {
-  const x = pctChange * 10;
+function downsideMomentumFactor(pctChange: number): number {
+  // For SELL ranking, stronger negative move is better.
+  const x = -pctChange * 10;
   return clamp01(1 / (1 + Math.exp(-x)));
 }
 
@@ -92,34 +82,36 @@ function dataQualityFactor(q: "complete" | "inferred" | "missing"): number {
 
 function weightedScore(parts: {
   recency: number;
-  momentum: number;
+  downsideMomentum: number;
   entry: number;
   freshness: number;
   market: number;
   quality: number;
 }): number {
   const wRecency = 0.27;
-  const wMomentum = 0.23;
+  const wDownsideMomentum = 0.23;
   const wEntry = 0.18;
   const wFreshness = 0.12;
   const wMarket = 0.08;
   const wQuality = 0.12;
+
   const raw =
     parts.recency * wRecency +
-    parts.momentum * wMomentum +
+    parts.downsideMomentum * wDownsideMomentum +
     parts.entry * wEntry +
     parts.freshness * wFreshness +
     parts.market * wMarket +
     parts.quality * wQuality;
+
   return Math.round(raw * 10000) / 100;
 }
 
-export function buildRecommendations(signals: SignalInput[], topK = 100, minScore = 35): Recommendation[] {
-  const out: Recommendation[] = [];
+export function buildSellRecommendations(signals: SignalInput[], topK = 100, minScore = 35): SellRecommendation[] {
+  const out: SellRecommendation[] = [];
 
   for (const row of signals) {
     const signal = String(row.signal || "").trim().toUpperCase();
-    if (signal !== "BUY") continue;
+    if (signal !== "SELL") continue;
 
     const candles = toCandlesAgo(row.bars_ago);
     const signalPrice = toNumber(row.signal_price);
@@ -131,12 +123,12 @@ export function buildRecommendations(signals: SignalInput[], topK = 100, minScor
     const quality = row.data_quality || "complete";
 
     const recency = recencyFactor(candles);
-    const momentum = momentumFactor(pct);
+    const downsideMomentum = downsideMomentumFactor(pct);
     const entry = entryFactor(pct);
     const fresh = freshnessFactor(row.ts);
     const mkt = marketFactor(row.market);
     const qf = dataQualityFactor(quality);
-    const score = weightedScore({ recency, momentum, entry, freshness: fresh, market: mkt, quality: qf });
+    const score = weightedScore({ recency, downsideMomentum, entry, freshness: fresh, market: mkt, quality: qf });
     if (score < minScore) continue;
 
     out.push({
@@ -144,14 +136,14 @@ export function buildRecommendations(signals: SignalInput[], topK = 100, minScor
       symbol_name: row.symbol_name,
       market: row.market || "UNKNOWN",
       timeframe: row.timeframe,
-      signal: "BUY",
+      signal: "SELL",
       candles_ago: candles,
       signal_price: signalPrice,
       current_price: currentPrice,
       change,
       pct_change: pct,
       recency_factor: recency,
-      momentum_factor: momentum,
+      downside_momentum_factor: downsideMomentum,
       entry_factor: entry,
       freshness_factor: fresh,
       market_factor: mkt,
@@ -166,7 +158,7 @@ export function buildRecommendations(signals: SignalInput[], topK = 100, minScor
   out.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     if (b.quality_factor !== a.quality_factor) return b.quality_factor - a.quality_factor;
-    if (b.momentum_factor !== a.momentum_factor) return b.momentum_factor - a.momentum_factor;
+    if (b.downside_momentum_factor !== a.downside_momentum_factor) return b.downside_momentum_factor - a.downside_momentum_factor;
     if (a.candles_ago !== b.candles_ago) return a.candles_ago - b.candles_ago;
     return a.symbol.localeCompare(b.symbol);
   });

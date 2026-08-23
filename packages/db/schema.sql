@@ -1,28 +1,8 @@
-create table if not exists scan_runs (
-  id bigserial primary key,
-  group_id integer not null,
-  timeframe text not null,
-  status text not null,
-  error text,
-  started_at timestamptz not null default now(),
-  finished_at timestamptz
-);
-
-create table if not exists signals (
-  id bigserial primary key,
-  symbol text not null,
-  timeframe text not null,
-  signal text not null check (signal in ('BUY', 'SELL', 'NEUTRAL')),
-  price numeric,
-  signal_price numeric,
-  bars_ago integer,
-  ts timestamptz not null,
-  run_id bigint references scan_runs(id),
-  created_at timestamptz not null default now(),
-  unique(symbol, timeframe, ts)
-);
-
-alter table signals add column if not exists signal_price numeric;
-alter table signals add column if not exists bars_ago integer;
-
-create index if not exists idx_signals_symbol_tf_ts on signals(symbol, timeframe, ts desc);
+create table if not exists markets (id bigserial primary key,symbol text not null,base_asset text not null,quote_asset text not null,market_type text not null check(market_type in('SPOT','PERP')),active boolean not null default true,price numeric,change_24h numeric,volume_24h numeric,updated_at timestamptz not null default now(),unique(symbol,market_type));
+create table if not exists scan_runs (id bigserial primary key,shard integer not null default 0,status text not null,symbols_scanned integer not null default 0,error text,started_at timestamptz not null default now(),finished_at timestamptz);
+create table if not exists ut_signals (id bigserial primary key,market_id bigint not null references markets(id) on delete cascade,timeframe text not null,direction text not null check(direction in('BUY','SELL')),bars_ago integer not null,signal_at timestamptz not null,candle_close_at timestamptz not null,price numeric not null,trailing_stop numeric,run_id bigint references scan_runs(id),created_at timestamptz not null default now(),unique(market_id,timeframe,candle_close_at));
+create index if not exists ut_signals_latest on ut_signals(market_id,timeframe,candle_close_at desc);
+create table if not exists alignment_events (id bigserial primary key,market_id bigint not null references markets(id) on delete cascade,direction text not null check(direction in('BUY','SELL')),previous_count integer not null,new_count integer not null,trigger_timeframe text,entry_price numeric not null,detected_at timestamptz not null default now(),return_1h numeric,return_4h numeric,return_12h numeric,return_1d numeric,return_3d numeric,return_7d numeric,mfe numeric,mae numeric);
+create table if not exists alert_endpoints (id bigserial primary key,channel text not null,destination text not null,enabled boolean not null default true,created_at timestamptz not null default now());
+create or replace view scanner_latest as with latest as(select distinct on(u.market_id,u.timeframe)u.* from ut_signals u order by u.market_id,u.timeframe,u.candle_close_at desc),fresh as(select market_id,direction,detected_at from alignment_events where detected_at>now()-interval '24 hours') select m.symbol,m.base_asset,m.quote_asset,m.market_type,m.price,m.change_24h,m.volume_24h,m.updated_at,l.timeframe,l.direction,l.bars_ago,case when l.timeframe='1H' then(l.bars_ago||'h')when l.timeframe in('4H','6H','12H')then(l.bars_ago||' bars')when l.timeframe='1D'then(l.bars_ago||'d')else(l.bars_ago||'w')end age_label,(f.market_id is not null)is_new_alignment from markets m join latest l on l.market_id=m.id left join fresh f on f.market_id=m.id and f.direction=l.direction where m.active;
+create or replace view alignment_performance as select direction,count(*)signal_count,avg(case when return_1d>0 then 1.0 else 0 end)*100 win_rate_1d,avg(case when return_3d>0 then 1.0 else 0 end)*100 win_rate_3d,avg(case when return_7d>0 then 1.0 else 0 end)*100 win_rate_7d,avg(return_1d)avg_return_1d,avg(return_7d)avg_return_7d,max(mfe)best_mfe,min(mae)worst_mae from alignment_events group by direction;
