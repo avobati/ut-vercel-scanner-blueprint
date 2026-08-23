@@ -211,6 +211,25 @@ function demoRows(): ScannerRow[] {
   });
 }
 
+async function getLiveMexcPrices(): Promise<Map<string, number>> {
+  const prices = new Map<string, number>();
+  try {
+    const [spotResponse, perpResponse] = await Promise.all([
+      fetch("https://api.mexc.com/api/v3/ticker/24hr", { cache: "no-store", signal: AbortSignal.timeout(6000) }),
+      fetch("https://contract.mexc.com/api/v1/contract/ticker", { cache: "no-store", signal: AbortSignal.timeout(6000) }),
+    ]);
+    if (spotResponse.ok) {
+      const spot = await spotResponse.json() as Array<{ symbol: string; lastPrice: string }>;
+      for (const ticker of spot) if (ticker.symbol?.endsWith("USDT") && Number(ticker.lastPrice) > 0) prices.set(`SPOT:${ticker.symbol}`, Number(ticker.lastPrice));
+    }
+    if (perpResponse.ok) {
+      const payload = await perpResponse.json() as { data?: Array<{ symbol: string; lastPrice: number }> };
+      for (const ticker of payload.data ?? []) { const symbol = ticker.symbol?.replace("_", ""); if (symbol?.endsWith("USDT") && Number(ticker.lastPrice) > 0) prices.set(`PERP:${symbol}`, Number(ticker.lastPrice)); }
+    }
+  } catch { /* Stored scan prices remain the safe fallback if MEXC is temporarily unavailable. */ }
+  return prices;
+}
+
 export async function getScannerRows(): Promise<ScannerRow[]> {
   if (!pool) return demoRows();
   try {
@@ -222,6 +241,7 @@ export async function getScannerRows(): Promise<ScannerRow[]> {
       having count(distinct timeframe) = 6
       order by volume_24h desc limit 2500`);
     if (!rows.length) return demoRows();
-    return rows.map((r) => { const signals = r.signals as ScannerRow["signals"]; return { symbol: r.symbol, base: r.base_asset, quote: r.quote_asset, market: r.market_type, price: Number(r.price), change24h: Number(r.change_24h), volume24h: Number(r.volume_24h), signals, ...scoreSignals(signals), lastChange: "recently", isNewAlignment: Boolean(Number(r.is_new_alignment)), updatedAt: r.updated_at }; });
+    const livePrices = await getLiveMexcPrices();
+    return rows.map((r) => { const signals = r.signals as ScannerRow["signals"]; const market = r.market_type as ScannerRow["market"]; return { symbol: r.symbol, base: r.base_asset, quote: r.quote_asset, market, price: livePrices.get(`${market}:${r.symbol}`) ?? Number(r.price), change24h: Number(r.change_24h), volume24h: Number(r.volume_24h), signals, ...scoreSignals(signals), lastChange: "recently", isNewAlignment: Boolean(Number(r.is_new_alignment)), updatedAt: r.updated_at }; });
   } catch { return demoRows(); }
 }
