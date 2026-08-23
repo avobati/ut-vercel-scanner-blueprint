@@ -2,8 +2,8 @@ const SPOT = "https://api.mexc.com"; const FUTURES = "https://contract.mexc.com"
 async function json(url, retries = 3) { for (let i=0;i<retries;i++) { const r=await fetch(url,{headers:{"User-Agent":"SignalGrid/1.0"}}); if(r.ok) return r.json(); if(r.status!==429&&r.status<500) throw new Error(`${r.status} ${url}`); await new Promise(x=>setTimeout(x,500*2**i)); } throw new Error(`MEXC unavailable: ${url}`); }
 export async function discoverMarkets() {
   const [spotInfo, spotTickers, contracts] = await Promise.all([json(`${SPOT}/api/v3/exchangeInfo`), json(`${SPOT}/api/v3/ticker/24hr`), json(`${FUTURES}/api/v1/contract/detail`).catch(()=>({data:[]}))]);
-  const ticker = new Map(spotTickers.map(t=>[t.symbol,t])); const spot = spotInfo.symbols.filter(s=>s.status==="1"||s.status==="ENABLED").map(s=>({symbol:s.symbol,base:s.baseAsset,quote:s.quoteAsset,market:"SPOT",ticker:ticker.get(s.symbol)}));
-  const perp=(contracts.data||[]).filter(c=>c.state===0||c.state===1).map(c=>({symbol:String(c.symbol).replace("_",""),apiSymbol:c.symbol,base:c.baseCoin,quote:c.quoteCoin,market:"PERP",ticker:null})); return [...spot,...perp];
+  const ticker = new Map(spotTickers.map(t=>[t.symbol,t])); const spot = spotInfo.symbols.filter(s=>(s.status==="1"||s.status==="ENABLED")&&String(s.quoteAsset).toUpperCase()==="USDT").map(s=>({symbol:s.symbol,base:s.baseAsset,quote:"USDT",market:"SPOT",ticker:ticker.get(s.symbol)}));
+  const perp=(contracts.data||[]).filter(c=>(c.state===0||c.state===1)&&String(c.quoteCoin).toUpperCase()==="USDT").map(c=>({symbol:String(c.symbol).replace("_",""),apiSymbol:c.symbol,base:c.baseCoin,quote:"USDT",market:"PERP",ticker:null})); return [...spot,...perp];
 }
 function mapSpot(row){return{openTime:Number(row[0]),open:Number(row[1]),high:Number(row[2]),low:Number(row[3]),close:Number(row[4]),volume:Number(row[5]),closeTime:Number(row[6])}}
 export async function spotCandles(symbol, interval, limit=260){return (await json(`${SPOT}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`)).map(mapSpot)}
