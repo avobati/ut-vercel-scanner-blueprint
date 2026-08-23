@@ -217,7 +217,8 @@ export async function getScannerRows(): Promise<ScannerRow[]> {
     const { rows } = await pool.query(`select symbol, base_asset, quote_asset, market_type, price, change_24h, volume_24h, updated_at,
       jsonb_object_agg(timeframe, jsonb_build_object('direction', direction, 'barsAgo', bars_ago, 'age', age_label)) as signals,
       max(case when is_new_alignment then 1 else 0 end) as is_new_alignment
-      from scanner_latest group by symbol, base_asset, quote_asset, market_type, price, change_24h, volume_24h, updated_at
+      from scanner_latest where quote_asset = 'USDT' and symbol like '%USDT'
+      group by symbol, base_asset, quote_asset, market_type, price, change_24h, volume_24h, updated_at
       having count(distinct timeframe) = 6
       order by volume_24h desc limit 2500`);
     if (!rows.length) return demoRows();
